@@ -1,0 +1,633 @@
+---
+Module: Data Mining and Machine Learning - "Portfolio 3"
+Name: "Deborah Bose Adebayo"
+Student_Number: 2401695
+Institute: University of Greater Manchester
+---
+
+
+```{r}
+#install the necessary packages
+#install.packages("tidyverse")
+#install.packages("ggplot2")
+#install.packages("randomForest")
+#install.packages("forcats")
+#install.packages("kableExtra")
+#install.packages("caret")
+#install.packages("e1071")
+#install.packages("rpart")
+#install.packages("corrplot")
+#install.packages("ranger")
+```
+
+
+```{r}
+#load the libraries
+library("tidyverse")
+library("ggplot2")
+library("randomForest")
+library("forcats")
+library("kableExtra")
+library("caret") # to calculate linear model performance
+library("e1071") # Load library for SVR
+library("rpart") # Load the rpart package for decision tree
+library("corrplot")
+library("ranger")
+```
+
+
+
+Data Preparation
+
+1. Data Loading & Initial Inspection
+```{r}
+#get the working directory, and view the first rows of the dataset
+
+getwd()
+setwd("C:/Users/welcome/Desktop/Data Mining and Machine Learning")
+housing_data <- read.csv("Housing Data_Same Region.csv")
+
+head(housing_data)
+```
+
+
+2. Data Quality Checks
+
+```{r}
+#view the structure of the dataset
+str(housing_data)
+```
+
+```{r}
+#view the summary of the dataset
+summary(housing_data)
+```
+
+
+```{r}
+#check for missing values in the housing data
+colSums(is.na(housing_data))
+```
+
+```{r}
+#check for duplicates, using the unique identifier
+sum(duplicated(housing_data$PARCELNO))
+```
+
+```{r}
+
+# Get all duplicate parcels (with all columns)
+duplicates <- housing_data %>% 
+  group_by(PARCELNO) %>% 
+  filter(n() > 1) %>%  # Keep only parcels appearing >1 time
+  arrange(PARCELNO)    # Sort for easy viewing
+
+# View first 6 duplicates
+head(duplicates)
+
+```
+
+
+3. Feature Engineering & Type Conversion
+```{r}
+
+# Drop the first 3 columns
+housing_data <- housing_data[, -c(1, 2, 3)]  
+
+
+# Show new structure
+head(housing_data)
+
+```
+
+```{r}
+
+#move SALE_PRC as the target variable, to the last column.
+housing_data <- relocate(housing_data, SALE_PRC, .after = last_col())
+
+head(housing_data)
+```
+
+
+```{r}
+#check for Null Values
+colSums(is.na(housing_data))
+
+```
+
+
+```{r}
+
+#check the dimension of the dataframe
+dim(housing_data)
+
+```
+
+```{r}
+
+# Convert avno60plus to a factor, since it is a binary operator
+housing_data$avno60plus <- as.factor(housing_data$avno60plus)
+
+head(housing_data) # Display the first few rows of the dataset
+```
+
+
+```{r}
+
+# Convert month_sold to a factor
+housing_data$month_sold <- as.factor(housing_data$month_sold)
+
+head(housing_data)
+```
+
+
+```{r}
+# Verify the change. Check structure to confirm avno60plus and month_sold, are now factor
+str(housing_data)
+```
+
+
+```{r}
+# Check outliers for the non-categorical variables
+outliers <- boxplot(housing_data$SALE_PRC,
+                   housing_data$LND_SQFOOT,
+                   housing_data$TOT_LVG_AREA,
+                   housing_data$SPEC_FEAT_VAL,
+                   housing_data$RAIL_DIST,
+                   housing_data$OCEAN_DIST,
+                   housing_data$WATER_DIST,
+                   housing_data$CNTR_DIST,
+                   housing_data$SUBCNTR_DI,
+                   housing_data$HWY_DIST,
+                   housing_data$age,
+                   names = c("PRICE", "SQFOOT", "LVG_AREA",
+                           "SPEC_FEAT", "RAIL_DIST", "OCEAN_DIST",
+                           "WATER_DIST", "CNTR_DIST", "SUBCNTR_DI",
+                           "HWY_DIST", "age"),
+                   main = "Outliers in Housing Data",
+                   las = 2,          # Vertical labels
+                   cex.axis = 0.7)   # Label size
+```
+
+
+```{r}
+
+# Show total outlier counts for each variable
+sapply(housing_data[sapply(housing_data, is.numeric)], 
+       function(x) length(boxplot(x, plot = FALSE)$out))
+
+```
+
+
+```{r}
+
+# Scatter plot to view outliers for SPEC_FEAT_VAL and Price (the highest outlier count)
+ggplot(housing_data, aes(SALE_PRC, SPEC_FEAT_VAL, color=factor(structure_quality))) +
+  geom_point() +
+  labs(title = "SPEC_FEAT_VAL vs Price (Colored by Quality)")
+```
+
+
+Correlation Analysis
+```{r}
+#Correlation matrix for feature engineering
+cor_matrix <- cor(housing_data[, sapply(housing_data, is.numeric)])
+corrplot(cor_matrix,
+method = "color",
+type = "upper",
+tl.col = "black",
+addCoef.col = "black",
+number.cex = 0.7)
+```
+
+
+Top correlations with SALE_PRC
+```{r}
+top_correlations <- cor_matrix[, "SALE_PRC"] %>%
+sort(decreasing = TRUE) %>%
+head(10)
+
+kable(top_correlations, col.names = "Correlation with Sale Price") %>%
+kable_styling()
+```
+
+
+```{r}
+# Features sorted by correlation strength with Sale Price
+df <- data.frame(Feature = names(top_correlations), 
+                 Correlation = as.numeric(top_correlations))
+
+# Create correlation plot with value labels
+ggplot(df, aes(reorder(Feature, Correlation), Correlation, fill = Correlation > 0)) +
+  geom_col() +
+  geom_text(aes(label = round(Correlation, 2)),  # Add this line for numbers
+            hjust = ifelse(df$Corr > 0, -0.1, 1.1),  # Automatic positioning
+            size = 2.8) +  # Adjust text size
+  coord_flip() +
+  scale_fill_manual(values = c("red3", "blue3")) +  # Color coding
+  theme_minimal() +
+  theme(legend.position = "none") + # Hide fill legend
+  labs(title = "Features Correlations with Sale Price")
+```
+
+
+```{r}
+# Final structure check before modeling
+str(housing_data)
+summary(housing_data)
+colSums(is.na(housing_data))
+```
+
+
+Splitting the data into training and testing data
+```{r}
+#splitting the data into training (70%) and testing (30%) sets
+set.seed(123)
+
+sample_size <- floor(0.7 * nrow(housing_data))
+train_index <- sample(seq_len(nrow(housing_data)), size = sample_size)
+
+#Create explicit train and test sets
+train_data <- housing_data[train_index, ]
+test_data  <- housing_data[-train_index, ]
+
+head(train_data)
+head(test_data)
+```
+
+
+Training set size: 9,752 observations  
+Testing set size: 4,180 observations
+
+Each set contains 14 variables, including the target variable `SALE_PRC`.  
+This split ensures sufficient data for both model training and unbiased performance evaluation.
+```{r}
+
+dim(train_data)
+dim(test_data)
+```
+
+
+Note: The month_sold variable is treated as a categorical feature. The model creates 11 dummy variables (February to December), using January as the reference month. Most months show no statistically significant effect on price, except May (month_sold5).
+
+Properties located in areas with high airplane noise (avno60plus == 1) are expected to sell for about $65,090 less on average than those in quieter areas — and this difference is statistically significant.
+```{r}
+# Fit the linear regression model
+lm_model <- lm(SALE_PRC ~ ., data = train_data)
+
+# View model summary
+summary(lm_model)
+```
+
+
+```{r}
+
+# Predict on test data
+lm_predictions <- predict(lm_model, newdata = test_data)
+
+# Evaluate performance
+lm_performance <- postResample(pred = lm_predictions, obs = test_data$SALE_PRC)
+
+print(lm_performance)
+```
+
+
+A Support Vector Regression model with a linear kernel is fitted using the training dataset. The model is then used to predict sale prices on the test set, and its performance is evaluated using RMSE, MAE, and R-squared.
+```{r}
+
+# Train the SVR model with a linear kernel
+svr_linear <- svm(SALE_PRC ~ ., data = train_data, kernel = "linear")
+
+svr_linear_predictions <- predict(svr_linear, newdata = test_data) # Predict on test set
+
+svr_performance <- postResample(pred = svr_linear_predictions, obs = test_data$SALE_PRC) # Evaluate performance using caret
+
+
+print(svr_performance)
+
+```
+
+The RBF kernel, which is the default for Support Vector Regression, is used to capture non-linear relationships between predictors and sale price. This model is evaluated using standard performance metrics.
+```{r}
+
+# Train SVR model with the default RBF kernel
+svr_rbf <- svm(SALE_PRC ~ ., data = train_data)  # RBF is the default kernel
+
+svr_rbf_predictions <- predict(svr_rbf, newdata = test_data) # Predict on test data
+
+svr_rbf_performance <- postResample(pred = svr_rbf_predictions, obs = test_data$SALE_PRC) # Evaluate performance
+
+
+print(svr_rbf_performance)
+
+```
+
+
+```{r}
+
+# Train SVR model with polynomial kernel
+svr_poly <- svm(SALE_PRC ~ ., data = train_data, kernel = "poly")
+
+svr_poly_predictions <- predict(svr_poly, newdata = test_data) # Predict on test data
+
+svr_poly_performance <- postResample(pred = svr_poly_predictions, obs = test_data$SALE_PRC) # Evaluate performance
+
+
+print(svr_poly_performance)
+
+```
+
+
+```{r}
+
+# Fit the decision tree model
+dectree_model <- rpart(SALE_PRC ~ ., data = train_data)
+
+dectree_predictions <- predict(dectree_model, newdata = test_data) # Predict on the test set
+
+dectree_performance <- postResample(pred = dectree_predictions, obs = test_data$SALE_PRC) # Evaluate the model
+
+
+print(dectree_performance)
+
+```
+
+
+```{r}
+
+# Fit the Random Forest model with 100 trees
+rf_model_n100 <- randomForest(SALE_PRC ~ ., data = train_data, ntree = 100)
+
+rf_predictions_n100 <- predict(rf_model_n100, newdata = test_data) # Predict on the test data
+
+rf_performance_n100 <- postResample(pred = rf_predictions_n100, obs = test_data$SALE_PRC) # Evaluate performance
+
+
+print(rf_performance_n100)
+
+```
+
+
+```{r}
+
+# Fit the Random Forest model with 200 trees
+rf_model_n200 <- randomForest(SALE_PRC ~ ., data = train_data, ntree = 200)
+
+rf_predictions_n200 <- predict(rf_model_n200, newdata = test_data) # Predict on the test data
+
+rf_performance_n200 <- postResample(pred = rf_predictions_n200, obs = test_data$SALE_PRC) # Evaluate performance
+
+
+print(rf_performance_n200)
+```
+
+
+```{r}
+
+# Fit the Random Forest model with 500 trees
+rf_model_n500 <- randomForest(SALE_PRC ~ ., data = train_data, ntree = 500)
+
+rf_predictions_n500 <- predict(rf_model_n500, newdata = test_data) # Predict on the test data
+
+rf_performance_n500 <- postResample(pred = rf_predictions_n500, obs = test_data$SALE_PRC) # Evaluate performance
+
+
+print(rf_performance_n500)
+```
+
+
+```{r}
+#create a dataframe to put the RMSE of all the models
+models_dataframe <- data.frame(
+  Model = c("Linear Model", "SVR", "SVR (RBF)", "SVR (Poly)", 
+            "Decision Tree", "RF (n=100)", "RF (n=200)", "RF (n=500)"),
+  RMSE = c(
+    lm_performance[1],           
+    svr_performance[1],      
+    svr_rbf_performance[1],
+    svr_poly_performance[1],
+    dectree_performance[1],
+    rf_performance_n100[1],
+    rf_performance_n200[1],
+    rf_performance_n500[1]
+  )
+)
+
+# Print the cleaned dataframe
+print(models_dataframe)
+```
+
+
+```{r}
+
+ggplot(models_dataframe, aes(x = Model, y = RMSE, fill = Model)) +
+  geom_bar(stat = "identity") +  # Create bars for RMSE
+  labs(title = "RMSE Comparison for Different Models", 
+       x = "Model", 
+       y = "RMSE") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+```{r}
+# Find the row with the minimum RMSE
+best_model <- models_dataframe[which.min(models_dataframe$RMSE), ]
+
+# Print the result
+print(best_model)
+```
+
+
+```{r}
+
+# After identifying best_model
+print(paste("Tuning parameters for:", best_model$Model))
+
+# Use the same tree count from the best model (n=100)
+num_trees <- 100  # Directly using the known best model specification
+
+# Proceed with the tuning :
+control <- trainControl(method = "cv", number = 5)
+
+tune_grid <- expand.grid(
+  mtry = 2:7,
+  min.node.size = c(1, 5, 10),
+  splitrule = "variance"
+)
+
+set.seed(123)
+rf_tuned_ranger <- train(
+  SALE_PRC ~ .,
+  data = train_data,
+  method = "ranger",
+  metric = "RMSE",
+  tuneGrid = tune_grid,
+  trControl = control,
+  num.trees = num_trees  # references the best model's tree count
+)
+
+# View best parameters and performance
+print(rf_tuned_ranger)
+
+```
+
+After performing hyperparameter tuning on the Random Forest model using the ranger package and 5-fold cross-validation, the optimal parameters identified were mtry = 7 and min.node.size = 1. The final model was rebuilt using these values and evaluated on the test data, showing improved predictive performance.
+```{r}
+# Rebuild the final tuned model using ranger with best hyperparameters
+set.seed(123)
+final_rf_model <- ranger(
+  formula = SALE_PRC ~ .,
+  data = train_data,
+  num.trees = 100,
+  mtry = 7,
+  min.node.size = 1,
+  splitrule = "variance"
+  )
+
+# Predict on the test set
+final_predictions <- predict(final_rf_model, data = test_data)$predictions
+
+# Evaluate the model and print results
+final_performance <- postResample(pred = final_predictions, obs = test_data$SALE_PRC)
+
+print(paste("Final RMSE:", round(final_performance["RMSE"], 2)))
+print(paste("Final R-squared:", round(final_performance["Rsquared"], 4)))
+print(paste("Final MAE:", round(final_performance["MAE"], 2)))
+
+print(paste("Number of trees:", final_rf_model$num.trees))
+print(paste("mtry (features per split):", final_rf_model$mtry))
+print(paste("Minimum node size:", final_rf_model$min.node.size))
+print(paste("Split rule:", final_rf_model$splitrule))
+
+```
+
+
+The performance of all models was compared using Root Mean Squared Error (RMSE). The Linear Regression and Decision Tree models underperformed, while Support Vector Regression (SVR) with RBF and Polynomial kernels showed improvement. However, the Random Forest model consistently yielded the best results.
+
+After performing hyperparameter tuning using a grid search on mtry and min.node.size, the Tuned Random Forest model achieved the lowest RMSE (104,397.3), outperforming the previously best RF (n=100) model. This confirms the effectiveness of tuning in improving predictive accuracy.
+```{r}
+# Create a dataframe to compare model performance by RMSE
+models_dataframe_2 <- data.frame(
+  Model = c("Linear Model", "SVR", "SVR (RBF)", "SVR (Poly)", 
+            "Decision Tree", "RF (n=100)", "RF (n=200)", "RF (n=500)", "Tuned RF"),
+  
+  RMSE = c(
+    lm_performance[1],           
+    svr_performance[1],      
+    svr_rbf_performance[1],
+    svr_poly_performance[1],
+    dectree_performance[1],
+    rf_performance_n100[1],
+    rf_performance_n200[1],
+    rf_performance_n500[1],
+    final_performance["RMSE"]
+  )
+)
+
+# Print the comparison table
+print(models_dataframe_2)
+
+```
+
+
+```{r}
+ggplot(models_dataframe, aes(x = reorder(Model, RMSE), y = RMSE, fill = Model)) +
+  geom_bar(stat = "identity") +  
+  coord_flip() +
+  labs(x = "", y = "RMSE") +
+  theme_minimal()
+```
+
+
+```{r}
+# Confirm final model parameters
+print(paste("Final RMSE:", final_performance["RMSE"]))
+print(paste("mtry:", final_rf_model$mtry))
+print(paste("Node size:", final_rf_model$min.node.size))
+```
+
+
+```{r}
+
+# Save ONLY the tuned model (contains all parameters + learned structure)
+saveRDS(final_rf_model, "final_tuned_rf_model.rds")
+
+```
+
+
+```{r}
+# Load the saved tuned model
+tuned_model <- readRDS("final_tuned_rf_model.rds")
+tuned_model
+
+```
+
+
+```{r}
+# Create data with given input
+new_property <- data.frame(
+  PARCELNO = 728980145245,
+  LND_SQFOOT = 11247,
+  TOT_LVG_AREA = 4552,          
+  SPEC_FEAT_VAL = 2105,         
+  RAIL_DIST = 4871.9,
+  OCEAN_DIST = 18507.2,
+  WATER_DIST = 375.8,
+  CNTR_DIST = 43897.9,
+  SUBCNTR_DI = 40115.7,
+  HWY_DIST = 41917.1,
+  age = 42,
+  avno60plus = 0,
+  structure_quality = 5,
+  month_sold = 8
+)
+
+# Convert factors with ALL levels the model expects
+new_property$avno60plus <- factor(new_property$avno60plus, levels = 0:1)  # Both levels
+new_property$month_sold <- factor(new_property$month_sold, levels = 1:12) # All months
+
+# Predict
+predicted_price <- predict(tuned_model, data = new_property)$predictions
+
+# Format output
+print(paste("Predicted Price: $", 
+            format(round(predicted_price, 0), big.mark = ","), 
+            sep = ""))
+```
+
+
+```{r}
+# Calculate metrics - Predict on the test set
+test_predictions <- predict(tuned_model,      
+                            data = test_data)$predictions
+
+#Evaluate RMSE, R‑squared, MAE -------------------------------
+test_metrics <- postResample(pred = test_predictions,
+                             obs  = test_data$SALE_PRC)
+
+print(paste("Test RMSE:", round(test_metrics["RMSE"], 0)))  # Typical error margin
+print(paste("Test R²:", round(test_metrics["Rsquared"], 3))) # Variance explained
+```
+
+
+```{r}
+# Find comparable properties in the training data
+similar <- train_data[
+  abs(train_data$TOT_LVG_AREA - 4552) < 500 &       # ±500 sqft
+  train_data$structure_quality == 5 &               # Same quality
+  abs(train_data$age - 42) < 5,                    # ±5 years age
+  c("SALE_PRC", "TOT_LVG_AREA", "structure_quality", "age")]
+
+# Calculate price per sqft
+similar$price_per_sqft <- similar$SALE_PRC / similar$TOT_LVG_AREA
+summary(similar$price_per_sqft)
+
+# Your prediction's price/sqft
+your_pps <- 1277657 / 4552  # ≈ $281/sqft
+
+# Compare to market
+cat("Your price/sqft:", round(your_pps, 0), "\n",
+    "Neighborhood median:", median(similar$price_per_sqft, na.rm=TRUE))
+```
+
