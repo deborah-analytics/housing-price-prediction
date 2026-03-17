@@ -1,11 +1,3 @@
----
-Module: Data Mining and Machine Learning - "Portfolio 3"
-Name: "Deborah Bose Adebayo"
-Student_Number: 2401695
-Institute: University of Greater Manchester
----
-
-
 ```{r}
 #install the necessary packages
 #install.packages("tidyverse")
